@@ -1,0 +1,1806 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ตะลุยห้องแล็บคอมพิวเตอร์ - ผู้พิทักษ์ไอทีรุ่นจิ๋ว</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Mitr & Fredoka for playful and cute Thai/English typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@300..700&family=Mitr:wght@200;300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Font Awesome for beautiful kid-friendly icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- MediaPipe Libraries for Dynamic Real-Time Hand Tracking -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    
+    <!-- Custom styling with animations and custom scrollbars -->
+    <style>
+        body {
+            font-family: 'Fredoka', 'Mitr', sans-serif;
+            background-color: #f0f9ff;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        
+        .bounce-hover:hover {
+            transform: scale(1.05) translateY(-4px);
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        
+        .pulse-slow {
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.03); }
+        }
+
+        .glow-active {
+            box-shadow: 0 0 15px rgba(59, 130, 246, 0.6);
+            animation: glowing 1.5s infinite alternate;
+        }
+
+        @keyframes glowing {
+            from { box-shadow: 0 0 5px rgba(59, 130, 246, 0.4); }
+            to { box-shadow: 0 0 20px rgba(59, 130, 246, 0.8); }
+        }
+
+        /* Dragging classes */
+        .draggable-item {
+            cursor: grab;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            touch-action: none; /* Prevents scrolling when dragging on mobile */
+        }
+        .draggable-item:active {
+            cursor: grabbing;
+            transform: scale(1.08) rotate(-2deg);
+        }
+        
+        /* Custom scrollbar for Leaderboard */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #e0f2fe;
+            border-radius: 9999px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #38bdf8;
+            border-radius: 9999px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #0284c7;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between overflow-x-hidden text-slate-800 relative">
+
+    <!-- Glowing Magic Hand Cursor Overlay -->
+    <div id="hand-pointer" class="hidden fixed w-14 h-14 pointer-events-none z-[9999] transform -translate-x-1/2 -translate-y-1/2 transition-transform duration-75">
+        <div class="relative w-full h-full flex items-center justify-center">
+            <!-- Outer magic ring -->
+            <div id="pointer-ring" class="absolute inset-0 border-4 border-dashed border-yellow-400 rounded-full animate-spin"></div>
+            <!-- Center icon -->
+            <span id="pointer-icon" class="text-2xl drop-shadow-md">⭐</span>
+        </div>
+    </div>
+
+    <!-- Floating Camera View Panel -->
+    <div id="camera-panel" class="hidden fixed bottom-4 right-4 bg-white/95 backdrop-blur-md rounded-3xl p-3.5 shadow-2xl border-4 border-indigo-400 z-50 w-64 flex flex-col gap-2 transform transition-all hover:scale-105">
+        <div class="flex justify-between items-center text-xs font-black text-slate-700">
+            <span class="flex items-center gap-1.5">
+                <span class="w-3 h-3 bg-red-500 rounded-full animate-pulse block"></span> 
+                กล้องวิเศษกำลังทำงานคอยจับมือ
+            </span>
+            <button onclick="stopCameraMode()" class="text-rose-500 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 p-1 rounded-full transition-all">
+                <i class="fa-solid fa-circle-xmark text-lg"></i>
+            </button>
+        </div>
+        <div class="relative w-full h-44 bg-slate-800 rounded-2xl overflow-hidden shadow-inner border-2 border-slate-200">
+            <!-- Mirrored Camera stream -->
+            <video id="webcam-video" autoplay playsinline muted class="absolute inset-0 w-full h-full object-cover transform -scale-x-100"></video>
+            <canvas id="webcam-canvas" class="absolute inset-0 w-full h-full object-cover transform -scale-x-100"></canvas>
+        </div>
+        <p class="text-[10px] text-indigo-600 text-center font-extrabold bg-indigo-50 py-1 rounded-lg">
+            วิธีลากวาง: เอานิ้วโป้ง + นิ้วชี้ มาแตะกันเพื่อคีบวัตถุจ้า 👌
+        </p>
+    </div>
+
+    <script>
+        // Web Audio API Sound Generator (No external files needed)
+        const playSound = (type) => {
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                
+                if (type === 'correct') {
+                    // Cute rising arpeggio
+                    const now = ctx.currentTime;
+                    const freqs = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+                    freqs.forEach((f, index) => {
+                        const osc = ctx.createOscillator();
+                        const gain = ctx.createGain();
+                        osc.type = 'sine';
+                        osc.frequency.setValueAtTime(f, now + index * 0.08);
+                        gain.gain.setValueAtTime(0.15, now + index * 0.08);
+                        gain.gain.exponentialRampToValueAtTime(0.01, now + index * 0.08 + 0.15);
+                        osc.connect(gain);
+                        gain.connect(ctx.destination);
+                        osc.start(now + index * 0.08);
+                        osc.stop(now + index * 0.08 + 0.2);
+                    });
+                } else if (type === 'wrong') {
+                    // Disappointing low buzz
+                    const now = ctx.currentTime;
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(220, now); // A3
+                    osc.frequency.linearRampToValueAtTime(110, now + 0.25); // A2
+                    gain.gain.setValueAtTime(0.2, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.start(now);
+                    osc.stop(now + 0.4);
+                } else if (type === 'levelup') {
+                    // Majestic victory fan-fare
+                    const now = ctx.currentTime;
+                    const notes = [261.63, 329.63, 392.00, 523.25, 392.00, 523.25, 659.25, 783.99, 1046.50];
+                    notes.forEach((f, index) => {
+                        const osc = ctx.createOscillator();
+                        const gain = ctx.createGain();
+                        osc.type = 'triangle';
+                        osc.frequency.setValueAtTime(f, now + index * 0.06);
+                        gain.gain.setValueAtTime(0.15, now + index * 0.06);
+                        gain.gain.exponentialRampToValueAtTime(0.01, now + index * 0.06 + 0.2);
+                        osc.connect(gain);
+                        gain.connect(ctx.destination);
+                        osc.start(now + index * 0.06);
+                        osc.stop(now + index * 0.06 + 0.25);
+                    });
+                } else if (type === 'click') {
+                    const now = ctx.currentTime;
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(600, now);
+                    gain.gain.setValueAtTime(0.1, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.start(now);
+                    osc.stop(now + 0.08);
+                }
+            } catch (e) {
+                console.warn("Audio Context init error or disabled by browser policy: ", e);
+            }
+        };
+    </script>
+
+    <script>
+        // High Quality Cute SVG Generators
+        const SVG_ASSETS = {
+            monitor: `<svg viewBox="0 0 100 100" class="w-full h-full"><rect x="10" y="15" width="80" height="55" rx="8" fill="#38BDF8" stroke="#0284C7" stroke-width="4"/><rect x="15" y="20" width="70" height="40" rx="4" fill="#E0F2FE"/><rect x="42" y="70" width="16" height="15" fill="#0284C7"/><path d="M30,85 L70,85" stroke="#0284C7" stroke-width="6" stroke-linecap="round"/><circle cx="35" cy="35" r="4" fill="#1E293B"/><circle cx="65" cy="35" r="4" fill="#1E293B"/><path d="M45,48 Q50,55 55,48" stroke="#1E293B" stroke-width="3" fill="none" stroke-linecap="round"/><circle cx="80" cy="25" r="2" fill="#22C55E"/></svg>`,
+            keyboard: `<svg viewBox="0 0 100 100" class="w-full h-full"><rect x="8" y="35" width="84" height="35" rx="6" fill="#F43F5E" stroke="#BE123C" stroke-width="4"/><rect x="14" y="41" width="10" height="7" rx="2" fill="#FFF"/><rect x="28" y="41" width="10" height="7" rx="2" fill="#FFF"/><rect x="42" y="41" width="10" height="7" rx="2" fill="#FFF"/><rect x="56" y="41" width="10" height="7" rx="2" fill="#FFF"/><rect x="70" y="41" width="16" height="7" rx="2" fill="#FFF"/><rect x="14" y="52" width="12" height="7" rx="2" fill="#FFF"/><rect x="30" y="52" width="40" height="7" rx="2" fill="#FFF"/><rect x="74" y="52" width="12" height="7" rx="2" fill="#FFF"/><circle cx="43" cy="25" r="2.5" fill="#BE123C"/><circle cx="57" cy="25" r="2.5" fill="#BE123C"/><path d="M47,29 Q50,32 53,29" stroke="#BE123C" stroke-width="2" fill="none"/></svg>`,
+            mouse: `<svg viewBox="0 0 100 100" class="w-full h-full"><path d="M30,30 C30,15 70,15 70,30 L70,70 C70,85 30,85 30,70 Z" fill="#FBBF24" stroke="#D97706" stroke-width="4"/><line x1="50" y1="18" x2="50" y2="45" stroke="#D97706" stroke-width="4"/><rect x="46" y="25" width="8" height="12" rx="3" fill="#EF4444"/><circle cx="40" cy="55" r="3" fill="#1E293B"/><circle cx="60" cy="55" r="3" fill="#1E293B"/><path d="M46,65 Q50,68 54,65" stroke="#1E293B" stroke-width="2.5" fill="none"/><path d="M30,22 Q15,20 10,40" stroke="#D97706" stroke-width="3" fill="none"/></svg>`,
+            cpu: `<svg viewBox="0 0 100 100" class="w-full h-full"><rect x="25" y="10" width="50" height="80" rx="8" fill="#10B981" stroke="#047857" stroke-width="4"/><rect x="33" y="20" width="34" height="10" rx="3" fill="#047857"/><line x1="38" y1="25" x2="50" y2="25" stroke="#FFF" stroke-width="3" stroke-linecap="round"/><circle cx="60" cy="25" r="2.5" fill="#22C55E"/><circle cx="50" cy="50" r="14" fill="#047857"/><circle cx="50" cy="50" r="10" fill="#059669"/><circle cx="50" cy="80" r="5" fill="#EF4444" class="pulse-slow"/><circle cx="40" cy="68" r="3.5" fill="#1E293B"/><circle cx="60" cy="68" r="3.5" fill="#1E293B"/><path d="M46,74 Q50,77 54,74" stroke="#1E293B" stroke-width="2.5" fill="none"/></svg>`,
+            printer: `<svg viewBox="0 0 100 100" class="w-full h-full"><rect x="15" y="40" width="70" height="38" rx="6" fill="#A855F7" stroke="#7E22CE" stroke-width="4"/><rect x="25" y="20" width="50" height="23" rx="3" fill="#E9D5FF" stroke="#7E22CE" stroke-width="3"/><rect x="28" y="65" width="44" height="25" rx="2" fill="#FFF" stroke="#7E22CE" stroke-width="3"/><line x1="36" y1="75" x2="64" y2="75" stroke="#7E22CE" stroke-width="2"/><line x1="36" y1="81" x2="54" y2="81" stroke="#7E22CE" stroke-width="2"/><circle cx="42" cy="52" r="3.5" fill="#FFF"/><circle cx="58" cy="52" r="3.5" fill="#FFF"/><path d="M47,58 Q50,61 53,58" stroke="#FFF" stroke-width="2.5" fill="none"/><circle cx="78" cy="48" r="2.5" fill="#22C55E"/></svg>`,
+            scanner: `<svg viewBox="0 0 100 100" class="w-full h-full"><rect x="12" y="30" width="76" height="46" rx="6" fill="#64748B" stroke="#334155" stroke-width="4"/><rect x="18" y="36" width="64" height="28" rx="2" fill="#94A3B8" stroke="#334155" stroke-width="3"/><rect x="20" y="38" width="60" height="24" fill="#06B6D4" opacity="0.4"/><line x1="22" y1="42" x2="78" y2="42" stroke="#FFF" stroke-width="3" opacity="0.8"/><circle cx="43" cy="62" r="3" fill="#FFF"/><circle cx="57" cy="62" r="3" fill="#FFF"/><path d="M47,68 Q50,71 53,68" stroke="#FFF" stroke-width="2" fill="none"/><circle cx="80" cy="65" r="2" fill="#EAB308"/></svg>`,
+            speaker: `<svg viewBox="0 0 100 100" class="w-full h-full"><rect x="15" y="15" width="32" height="70" rx="5" fill="#8B4513" stroke="#5C2E0B" stroke-width="3"/><rect x="53" y="15" width="32" height="70" rx="5" fill="#8B4513" stroke="#5C2E0B" stroke-width="3"/><circle cx="31" cy="35" r="9" fill="#000"/><circle cx="31" cy="65" r="12" fill="#000"/><circle cx="69" cy="35" r="9" fill="#000"/><circle cx="69" cy="65" r="12" fill="#000"/><circle cx="31" cy="65" r="6" fill="#94A3B8"/><circle cx="69" cy="65" r="6" fill="#94A3B8"/><path d="M8,40 Q3,45 8,50" stroke="#D97706" stroke-width="3" fill="none" stroke-linecap="round"/><path d="M92,40 Q97,45 92,50" stroke="#D97706" stroke-width="3" fill="none" stroke-linecap="round"/></svg>`,
+            webcam: `<svg viewBox="0 0 100 100" class="w-full h-full"><circle cx="50" cy="40" r="25" fill="#3B82F6" stroke="#1D4ED8" stroke-width="4"/><circle cx="50" cy="40" r="16" fill="#1E293B"/><circle cx="47" cy="37" r="4" fill="#FFF"/><rect x="44" y="65" width="12" height="15" fill="#1D4ED8"/><path d="M25,85 L75,85" stroke="#1D4ED8" stroke-width="6" stroke-linecap="round"/><circle cx="38" cy="40" r="2" fill="#EF4444"/><circle cx="62" cy="40" r="2" fill="#22C55E"/></svg>`,
+            microphone: `<svg viewBox="0 0 100 100" class="w-full h-full"><rect x="40" y="15" width="20" height="40" rx="10" fill="#6B7280" stroke="#374151" stroke-width="4"/><line x1="40" y1="35" x2="60" y2="35" stroke="#374151" stroke-width="2"/><path d="M30,35 C30,60 70,60 70,35" stroke="#374151" stroke-width="4" fill="none"/><line x1="50" y1="55" x2="50" y2="78" stroke="#374151" stroke-width="6"/><path d="M35,80 L65,80" stroke="#374151" stroke-width="6" stroke-linecap="round"/><circle cx="46" cy="27" r="2" fill="#EF4444"/><circle cx="54" cy="27" r="2" fill="#22C55E"/></svg>`,
+            headphone: `<svg viewBox="0 0 100 100" class="w-full h-full"><path d="M20,50 C20,15 80,15 80,50" stroke="#EC4899" stroke-width="6" fill="none" stroke-linecap="round"/><rect x="12" y="45" width="16" height="25" rx="5" fill="#D946EF" stroke="#A21CAF" stroke-width="3"/><rect x="72" y="45" width="16" height="25" rx="5" fill="#D946EF" stroke="#A21CAF" stroke-width="3"/><circle cx="20" cy="57" r="3.5" fill="#FFF"/><circle cx="80" cy="57" r="3.5" fill="#FFF"/><path d="M44,22 Q50,25 56,22" stroke="#FFF" stroke-width="2.5" fill="none"/><path d="M12,65 Q8,80 20,80" stroke="#A21CAF" stroke-width="3" fill="none"/></svg>`,
+            flashdrive: `<svg viewBox="0 0 100 100" class="w-full h-full"><rect x="35" y="40" width="30" height="45" rx="5" fill="#0EA5E9" stroke="#0369A1" stroke-width="4"/><rect x="42" y="18" width="16" height="22" fill="#94A3B8" stroke="#475569" stroke-width="3"/><rect x="47" y="24" width="2" height="6" fill="#475569"/><rect x="51" y="24" width="2" height="6" fill="#475569"/><circle cx="50" cy="65" r="4.5" fill="#FFF"/><path d="M47,73 Q50,76 53,73" stroke="#FFF" stroke-width="2.5" fill="none"/><circle cx="50" cy="11" r="5" fill="none" stroke="#94A3B8" stroke-width="3"/></svg>`,
+            harddisk: `<svg viewBox="0 0 100 100" class="w-full h-full"><rect x="22" y="15" width="56" height="70" rx="6" fill="#475569" stroke="#1E293B" stroke-width="4"/><circle cx="50" cy="42" r="22" fill="#94A3B8" stroke="#334155" stroke-width="3"/><circle cx="50" cy="42" r="6" fill="#F1F5F9"/><path d="M50,42 L65,65" stroke="#EF4444" stroke-width="3" stroke-linecap="round"/><circle cx="34" cy="74" r="3" fill="#22C55E"/><circle cx="66" cy="74" r="3" fill="#EAB308"/><circle cx="50" cy="76" r="4" fill="#1E293B"/></svg>`
+        };
+    </script>
+
+    <script>
+        // Global Game State
+        const state = {
+            playerName: "นักเรียน",
+            score: 0,
+            xp: 0,
+            combo: 0,
+            maxCombo: 0,
+            accuracy: 100,
+            correctCount: 0,
+            wrongCount: 0,
+            currentLevel: 1,
+            timer: 60,
+            timerInterval: null,
+            answersChecked: false,
+            levelData: [], // Stores items being tested in the current level
+            levelPerfect: true,
+            cameraActive: false,
+            grabbedElement: null,
+            grabbedElementOriginalParent: null,
+            leaderboard: [
+                { name: "น้องบีม", score: 850, level: 5, accuracy: 95 },
+                { name: "น้องอันดา", score: 720, level: 5, accuracy: 90 },
+                { name: "น้องนะโม", score: 640, level: 4, accuracy: 88 }
+            ]
+        };
+
+        // Complete Dataset for standard computing science (Grade 1-3)
+        const DEVICES = {
+            monitor: { id: "monitor", name: "จอภาพ (Monitor)", desc: "แสดงภาพและข้อความให้เห็น", cat: "output", label: "จอภาพ" },
+            keyboard: { id: "keyboard", name: "คีย์บอร์ด (Keyboard)", desc: "พิมพ์ข้อความและตัวเลข", cat: "input", label: "คีย์บอร์ด" },
+            mouse: { id: "mouse", name: "เมาส์ (Mouse)", desc: "คลิกและเลือกสิ่งต่างๆ บนจอ", cat: "input", label: "เมาส์" },
+            cpu: { id: "cpu", name: "เคส/ซีพียู (CPU)", desc: "สมองคอมพิวเตอร์ คอยคิดคำนวณ", cat: "processing", label: "ซีพียู" },
+            printer: { id: "printer", name: "เครื่องพิมพ์ (Printer)", desc: "พิมพ์รูปหรือข้อความลงกระดาษ", cat: "output", label: "เครื่องพิมพ์" },
+            speaker: { id: "speaker", name: "ลำโพง (Speaker)", desc: "ส่งเสียงเพลงและเสียงต่างๆ", cat: "output", label: "ลำโพง" },
+            webcam: { id: "webcam", name: "กล้องเว็บแคม (Webcam)", desc: "จับภาพและวิดีโอเข้าคอมพิวเตอร์", cat: "input", label: "กล้องเว็บแคม" },
+            microphone: { id: "microphone", name: "ไมโครโฟน (Microphone)", desc: "รับเสียงพูดของคุณครูและนักเรียน", cat: "input", label: "ไมโครโฟน" },
+            headphone: { id: "headphone", name: "หูฟัง (Headphone)", desc: "ส่งเสียงให้เราฟังคนเดียว", cat: "output", label: "หูฟัง" },
+            scanner: { id: "scanner", name: "เครื่องสแกน (Scanner)", desc: "แสกนเอกสารเข้าสู่คอมพิวเตอร์", cat: "input", label: "เครื่องสแกน" },
+            flashdrive: { id: "flashdrive", name: "แฟลชไดรฟ์ (Flash Drive)", desc: "เก็บข้อมูลและเซฟงานของเรา", cat: "storage", label: "แฟลชไดรฟ์" },
+            harddisk: { id: "harddisk", name: "ฮาร์ดดิสก์ (Hard Disk)", desc: "หน่วยเก็บข้อมูลขนาดใหญ่ในคอม", cat: "storage", label: "ฮาร์ดดิสก์" }
+        };
+
+        // Load leaderboard from localStorage if it exists
+        if (localStorage.getItem("it_kids_leaderboard")) {
+            state.leaderboard = JSON.parse(localStorage.getItem("it_kids_leaderboard"));
+        }
+    </script>
+
+    <header class="bg-gradient-to-r from-blue-500 via-sky-400 to-emerald-500 text-white p-4 shadow-lg relative overflow-hidden shrink-0">
+        <!-- Floating cartoon background elements -->
+        <div class="absolute -top-6 -left-6 w-20 h-20 bg-white opacity-20 rounded-full blur-lg"></div>
+        <div class="absolute -bottom-6 -right-6 w-32 h-32 bg-white opacity-20 rounded-full blur-lg"></div>
+        
+        <div class="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4 relative z-10">
+            <div class="flex items-center gap-3">
+                <div class="bg-yellow-300 p-2.5 rounded-2xl text-slate-800 shadow-md transform rotate-[-3deg] border-2 border-white">
+                    <i class="fa-solid fa-laptop-code text-2xl animate-bounce"></i>
+                </div>
+                <div>
+                    <h1 class="text-xl md:text-2xl font-bold tracking-wider drop-shadow-md">ตะลุยห้องแล็บคอมพิวเตอร์ 🚀</h1>
+                    <p class="text-xs md:text-sm text-sky-100">ผู้พิทักษ์ไอทีรุ่นจิ๋ว (วิทยาการคำนวณ ป.1-ป.3)</p>
+                </div>
+            </div>
+
+            <!-- Dashboard / Live stats for children -->
+            <div class="flex flex-wrap gap-3 text-sm font-semibold justify-center items-center">
+                <div class="bg-blue-600/40 backdrop-blur-sm px-4 py-1.5 rounded-full border border-blue-400/30 flex items-center gap-2">
+                    <span class="text-yellow-300"><i class="fa-solid fa-star"></i> คะแนน:</span>
+                    <span id="header-score" class="text-white font-bold text-base">0</span>
+                </div>
+                <div class="bg-emerald-600/40 backdrop-blur-sm px-4 py-1.5 rounded-full border border-emerald-400/30 flex items-center gap-2">
+                    <span class="text-green-300"><i class="fa-solid fa-bolt"></i> XP:</span>
+                    <span id="header-xp" class="text-white font-bold text-base">0</span>
+                </div>
+                <div id="combo-badge" class="hidden bg-pink-500 text-white px-3 py-1.5 rounded-full animate-bounce flex items-center gap-1 text-xs border border-white">
+                    <i class="fa-solid fa-fire"></i> COMBO x<span id="combo-multiplier">1</span>
+                </div>
+                
+                <!-- Hand Tracking Toggle Button -->
+                <button onclick="toggleCameraMode()" id="camera-toggle-btn" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 rounded-full shadow-md transition-all bounce-hover flex items-center gap-1.5 text-xs font-black border-2 border-white">
+                    <i class="fa-solid fa-wand-magic-sparkles animate-pulse"></i> กล้องจับมือวิเศษ 🎥
+                </button>
+
+                <button onclick="toggleTeacherMode()" class="bg-yellow-400 hover:bg-yellow-300 text-slate-900 px-4 py-1.5 rounded-full shadow-md transition-all bounce-hover flex items-center gap-2 text-xs font-bold border-2 border-slate-900">
+                    <i class="fa-solid fa-chalkboard-user"></i> สำหรับคุณครู
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl w-full mx-auto p-4 flex-grow flex flex-col justify-start relative">
+        
+        <!-- ================= START SCREEN ================= -->
+        <section id="start-screen" class="flex-grow flex flex-col items-center justify-center py-8">
+            <div class="bg-white rounded-3xl p-6 md:p-10 shadow-xl max-w-2xl w-full border-4 border-blue-200 text-center relative overflow-hidden">
+                <!-- Mascot -->
+                <div class="w-40 h-40 mx-auto mb-6 bg-gradient-to-tr from-sky-100 to-blue-200 rounded-full p-4 flex items-center justify-center shadow-inner">
+                    <div class="w-28 h-28">
+                        <script>document.write(SVG_ASSETS.monitor)</script>
+                    </div>
+                </div>
+
+                <h2 class="text-2xl md:text-3.5xl font-black text-blue-600 mb-2">ยินดีต้อนรับผู้พิทักษ์ไอที!</h2>
+                <p class="text-slate-500 mb-6 text-sm md:text-base">มาเรียนรู้อุปกรณ์คอมพิวเตอร์และเล่นเกมสุดสนุกไปด้วยกันเถอะเด็กๆ</p>
+                
+                <div class="bg-slate-50 p-5 rounded-2xl mb-6 max-w-md mx-auto text-left border border-slate-200">
+                    <label class="block text-sm font-bold text-slate-700 mb-2">
+                        <i class="fa-solid fa-user-astronaut text-blue-500 mr-1"></i> เขียนชื่อของหนูตรงนี้เลย:
+                    </label>
+                    <input type="text" id="player-name-input" placeholder="พิมพ์ชื่อเล่นของหนู..." max="15" class="w-full px-4 py-3 rounded-xl border-2 border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-400 text-slate-800 font-medium text-center text-lg">
+                </div>
+
+                <button onclick="startGame()" class="bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-400 hover:to-green-500 text-white font-black text-lg md:text-xl px-12 py-4 rounded-2xl shadow-lg border-b-4 border-green-700 transform hover:scale-105 active:scale-95 transition-all w-full max-w-xs bounce-hover">
+                    เริ่มสนุกกันเลย! 🎮
+                </button>
+            </div>
+        </section>
+
+        <!-- ================= GAMEPLAY AREA SCREEN ================= -->
+        <section id="game-screen" class="hidden flex-grow flex flex-col">
+            
+            <!-- Level and Progress bar indicator -->
+            <div class="bg-white rounded-2xl p-4 shadow-md border border-slate-100 mb-4 shrink-0">
+                <div class="flex flex-col md:flex-row justify-between items-center gap-3">
+                    <div class="flex items-center gap-3 w-full md:w-auto">
+                        <div class="bg-blue-100 text-blue-600 text-sm font-extrabold px-3.5 py-1.5 rounded-xl border border-blue-200 shrink-0">
+                            ด่านที่ <span id="current-level-display">1</span>/5
+                        </div>
+                        <h3 id="level-title-display" class="font-bold text-base md:text-lg text-slate-800">จับคู่ภาพกับชื่ออุปกรณ์</h3>
+                    </div>
+                    
+                    <!-- Timer for Level 4 -->
+                    <div id="level-timer-container" class="hidden items-center gap-2 bg-rose-50 border border-rose-200 px-4 py-1.5 rounded-xl animate-pulse">
+                        <span class="text-rose-500 font-bold text-sm"><i class="fa-regular fa-clock"></i> เวลาเหลือ:</span>
+                        <span id="level-timer" class="text-rose-600 font-black text-lg">60</span>
+                        <span class="text-rose-500 text-xs">วินาที</span>
+                    </div>
+
+                    <!-- Progress bar -->
+                    <div class="w-full md:w-48 bg-slate-100 h-3 rounded-full overflow-hidden border border-slate-200">
+                        <div id="level-progress-bar" class="bg-gradient-to-r from-blue-400 to-emerald-400 h-full transition-all duration-500" style="width: 20%;"></div>
+                    </div>
+                </div>
+                
+                <!-- Simple Level Guide / Instruction for kids -->
+                <div class="mt-2 bg-amber-50 rounded-xl p-2.5 border border-amber-200/60 flex items-start gap-2.5">
+                    <span class="text-amber-500 text-base shrink-0"><i class="fa-solid fa-lightbulb"></i></span>
+                    <p id="level-instruction" class="text-xs md:text-sm text-slate-600 font-medium">คำแนะนำวิธีเล่นด่านปัจจุบัน...</p>
+                </div>
+            </div>
+
+            <!-- Dynamic level workspaces container -->
+            <div id="level-workspace" class="flex-grow bg-white rounded-3xl p-4 md:p-6 shadow-xl border-2 border-sky-100 flex flex-col justify-between min-h-[420px]">
+                <!-- DYNAMIC CONTENT GENERATED BY JAVASCRIPT -->
+            </div>
+
+            <!-- Game actions row -->
+            <div class="mt-4 flex flex-col sm:flex-row justify-between items-center gap-3 bg-white p-4 rounded-2xl shadow-md border border-slate-100 shrink-0">
+                <div class="text-xs text-slate-400 font-medium">
+                    ความแม่นยำรวม: <span id="accuracy-display" class="text-slate-600 font-bold">100</span>% 
+                    | ตอบถูก: <span id="correct-display" class="text-emerald-500 font-bold">0</span> 
+                    | ตอบผิด: <span id="wrong-display" class="text-rose-500 font-bold">0</span>
+                </div>
+                <div class="flex gap-3 w-full sm:w-auto">
+                    <button id="check-btn" onclick="checkAnswers()" class="hidden bg-yellow-400 hover:bg-yellow-300 text-slate-900 px-6 py-2.5 rounded-xl font-bold shadow-md hover:shadow-lg transform active:scale-95 transition-all text-sm grow sm:grow-0 border-2 border-slate-900">
+                        <i class="fa-solid fa-clipboard-check mr-1"></i> ตรวจคำตอบ
+                    </button>
+                    <button id="next-level-btn" onclick="goToNextLevel()" class="hidden bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-white px-8 py-2.5 rounded-xl font-bold shadow-md hover:shadow-lg transform active:scale-95 transition-all text-sm grow sm:grow-0">
+                        ไปต่อด่านถัดไป <i class="fa-solid fa-arrow-right ml-1"></i>
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= VICTORY & CERTIFICATE SCREEN ================= -->
+        <section id="victory-screen" class="hidden flex-grow flex flex-col items-center justify-center py-6">
+            <div class="bg-white rounded-3xl p-6 md:p-10 shadow-xl max-w-3xl w-full border-4 border-yellow-300 text-center relative overflow-hidden">
+                <!-- Star explosion anim placeholder -->
+                <div class="absolute inset-0 pointer-events-none overflow-hidden" id="confetti-container"></div>
+                
+                <span class="text-6xl animate-bounce inline-block mb-3">🏆</span>
+                <h2 class="text-3xl font-black text-yellow-500 mb-1">ยินดีด้วยอย่างยิ่ง!</h2>
+                <h3 class="text-xl font-bold text-slate-700 mb-4">หนูผ่านการเป็น "ผู้พิทักษ์ไอทีรุ่นจิ๋ว" เรียบร้อยแล้ว!</h3>
+
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 max-w-2xl mx-auto mb-6">
+                    <div class="bg-blue-50 p-3 rounded-2xl border border-blue-100">
+                        <span class="text-xs text-slate-400 block font-bold">คะแนนรวม</span>
+                        <span id="victory-score" class="text-xl md:text-2xl font-black text-blue-600">0</span>
+                    </div>
+                    <div class="bg-emerald-50 p-3 rounded-2xl border border-emerald-100">
+                        <span class="text-xs text-slate-400 block font-bold">XP ทั้งหมด</span>
+                        <span id="victory-xp" class="text-xl md:text-2xl font-black text-emerald-600">0</span>
+                    </div>
+                    <div class="bg-amber-50 p-3 rounded-2xl border border-amber-100">
+                        <span class="text-xs text-slate-400 block font-bold">ความแม่นยำ</span>
+                        <span id="victory-accuracy" class="text-xl md:text-2xl font-black text-amber-600">100%</span>
+                    </div>
+                    <div class="bg-pink-50 p-3 rounded-2xl border border-pink-100">
+                        <span class="text-xs text-slate-400 block font-bold">คอมโบสูงสุด</span>
+                        <span id="victory-combo" class="text-xl md:text-2xl font-black text-pink-600">x0</span>
+                    </div>
+                </div>
+
+                <!-- Custom Dynamic Certificate Section -->
+                <div class="bg-slate-100 p-4 rounded-2xl mb-6 max-w-md mx-auto border border-slate-200">
+                    <p class="text-slate-600 text-sm mb-4">หนูต้องการรับเกียรติบัตรสุดเท่ไปอวดคุณพ่อคุณแม่ไหมคะ?</p>
+                    <button onclick="generateCertificate()" class="bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-400 hover:to-purple-400 text-white font-bold px-6 py-3 rounded-xl shadow-md transition-all bounce-hover text-sm w-full border-b-4 border-pink-700">
+                        <i class="fa-solid fa-file-award mr-1"></i> รับเกียรติบัตรของคุณหนู 📜
+                    </button>
+                </div>
+
+                <div class="flex gap-3 justify-center">
+                    <button onclick="resetGame()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold px-6 py-2.5 rounded-xl text-sm transition-all">
+                        <i class="fa-solid fa-rotate-right mr-1"></i> เล่นใหม่อีกครั้ง
+                    </button>
+                    <button onclick="toggleTeacherMode()" class="bg-sky-500 hover:bg-sky-400 text-white font-bold px-6 py-2.5 rounded-xl text-sm transition-all">
+                        <i class="fa-solid fa-trophy mr-1"></i> ดูคะแนนรวม
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= TEACHER MODE DASHBOARD MODAL ================= -->
+        <section id="teacher-screen" class="hidden flex-grow flex flex-col">
+            <div class="bg-white rounded-3xl p-6 shadow-xl border border-slate-200 w-full flex-grow flex flex-col justify-between">
+                <div>
+                    <div class="flex justify-between items-center border-b border-slate-100 pb-4 mb-4">
+                        <div class="flex items-center gap-2">
+                            <span class="bg-amber-100 text-amber-600 p-2 rounded-xl text-lg"><i class="fa-solid fa-chalkboard-user"></i></span>
+                            <div>
+                                <h3 class="font-black text-xl text-slate-800">โหมดการบริหารจัดการสำหรับคุณครู</h3>
+                                <p class="text-xs text-slate-400">บันทึกผลคะแนน, ส่งออกข้อมูล และวิเคราะห์ผลการเรียนรู้รายวิชาวิทยาการคำนวณ</p>
+                            </div>
+                        </div>
+                        <button onclick="closeTeacherMode()" class="bg-slate-100 hover:bg-slate-200 text-slate-500 p-2 rounded-full transition-all">
+                            <i class="fa-solid fa-xmark text-lg"></i>
+                        </button>
+                    </div>
+
+                    <!-- Curriculum Standard reference for educational evaluation -->
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                        <div class="bg-emerald-50 border border-emerald-100 rounded-2xl p-3 text-xs">
+                            <h4 class="font-bold text-emerald-800 mb-1"><i class="fa-solid fa-bookmark"></i> มาตรฐานการเรียนรู้</h4>
+                            <p class="text-slate-600">ว 4.2 เข้าใจและใช้เทคโนโลยีสารสนเทศและการสื่อสารในการเรียนรู้และการทำงาน</p>
+                        </div>
+                        <div class="bg-blue-50 border border-blue-100 rounded-2xl p-3 text-xs col-span-2">
+                            <h4 class="font-bold text-blue-800 mb-1"><i class="fa-solid fa-bullseye"></i> ตัวชี้วัดประเมินผล (วิทยาการคำนวณ ป.1-ป.3)</h4>
+                            <ul class="list-disc list-inside text-slate-600">
+                                <li>ด่าน 1-2: จำแนกและระบุชื่ออุปกรณ์เทคโนโลยีพื้นฐาน</li>
+                                <li>ด่าน 3: จัดกลุ่มคอมพิวเตอร์ตามประเภทหน้าที่ (รับเข้า, แสดงผล, บันทึกข้อมูล)</li>
+                                <li>ด่าน 5: ทักษะการแก้ปัญหาในการติดตั้ง/ทำงานร่วมกันของอุปกรณ์</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <!-- Statistics table -->
+                    <h4 class="font-bold text-slate-700 text-sm mb-2"><i class="fa-solid fa-ranking-star text-yellow-500 mr-1"></i> ตารางวิเคราะห์คะแนนนักเรียนล่าสุด</h4>
+                    <div class="bg-slate-50 rounded-2xl border border-slate-200 overflow-hidden max-h-[220px] overflow-y-auto mb-4">
+                        <table class="w-full text-left text-xs md:text-sm">
+                            <thead class="bg-slate-100 text-slate-500 font-bold sticky top-0">
+                                <tr>
+                                    <th class="p-3">ลำดับ</th>
+                                    <th class="p-3">ชื่อนักเรียน</th>
+                                    <th class="p-3 text-center">คะแนนสะสม</th>
+                                    <th class="p-3 text-center">ระดับสูงสุด</th>
+                                    <th class="p-3 text-center">อัตราตอบถูก</th>
+                                    <th class="p-3 text-center">ผลประเมิน</th>
+                                </tr>
+                            </thead>
+                            <tbody id="leaderboard-tbody" class="divide-y divide-slate-100">
+                                <!-- Appended dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="flex flex-wrap gap-3 pt-4 border-t border-slate-100 justify-end">
+                    <button onclick="exportCSV()" class="bg-emerald-500 hover:bg-emerald-400 text-white font-bold px-5 py-2 rounded-xl text-sm transition-all flex items-center gap-1.5 shadow-sm">
+                        <i class="fa-solid fa-file-excel"></i> ส่งออกไฟล์ CSV
+                    </button>
+                    <button onclick="clearLeaderboard()" class="bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold px-5 py-2 rounded-xl text-xs transition-all flex items-center gap-1.5">
+                        <i class="fa-solid fa-trash-can"></i> รีเซ็ตคะแนนทั้งหมด
+                    </button>
+                    <button onclick="closeTeacherMode()" class="bg-slate-800 hover:bg-slate-700 text-white font-bold px-6 py-2 rounded-xl text-sm transition-all">
+                        กลับสู่หน้าเกม
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= CERTIFICATE MODAL VIEW ================= -->
+        <section id="cert-modal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div class="bg-white rounded-3xl p-6 max-w-2xl w-full shadow-2xl border-4 border-amber-300 text-center relative max-h-[90vh] overflow-y-auto">
+                <button onclick="closeCertModal()" class="absolute top-4 right-4 bg-slate-100 hover:bg-slate-200 text-slate-500 p-2 rounded-full transition-all">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+                
+                <h3 class="font-extrabold text-xl text-slate-800 mb-2">🎉 ตรวจสอบความถูกต้องเกียรติบัตรของหนู 🎉</h3>
+                
+                <!-- Printable Certificate Container -->
+                <div id="certificate-print-area" class="border-8 border-double border-amber-400 p-6 md:p-8 rounded-2xl bg-amber-50 relative overflow-hidden my-4 max-w-full mx-auto">
+                    <!-- Elegant background graphics -->
+                    <div class="absolute top-0 left-0 w-24 h-24 bg-amber-200 opacity-20 rounded-full blur-xl"></div>
+                    <div class="absolute bottom-0 right-0 w-32 h-32 bg-sky-200 opacity-20 rounded-full blur-xl"></div>
+                    
+                    <span class="text-3xl">🏅</span>
+                    <h4 class="text-md font-bold tracking-widest text-slate-400 mt-2 uppercase">Certificate of Excellence</h4>
+                    <h1 class="text-lg md:text-xl font-extrabold text-blue-600 mt-1">เกียรติบัตรวิทยาการคำนวณ</h1>
+                    <p class="text-xs text-slate-500 mt-1">มอบให้เพื่อแสดงว่าผู้พิทักษ์ไอทีรุ่นจิ๋ว</p>
+                    
+                    <h2 id="cert-student-name" class="text-2xl md:text-3.5xl font-black text-rose-500 my-4 tracking-wide border-b-2 border-dashed border-rose-300 pb-1 inline-block min-w-[200px]">สมศักดิ์ รักดี</h2>
+                    
+                    <p class="text-xs md:text-sm text-slate-700 leading-relaxed max-w-md mx-auto">
+                        ได้ผ่านหลักสูตรการเรียนรู้ออนไลน์และเกมจำแนกประเภทอุปกรณ์ <strong class="text-indigo-600">"อุปกรณ์คอมพิวเตอร์เบื้องต้น"</strong> 
+                        ตามเกณฑ์หลักสูตรแกนกลางกลุ่มสาระวิทยาศาสตร์และเทคโนโลยี ว 4.2
+                    </p>
+
+                    <div class="flex justify-around items-center mt-6 pt-4 border-t border-slate-200 text-xs">
+                        <div>
+                            <span class="text-slate-400 block font-bold">คะแนนที่ได้</span>
+                            <span id="cert-score" class="text-emerald-600 font-extrabold text-base">550 คะแนน</span>
+                        </div>
+                        <div>
+                            <span class="text-slate-400 block font-bold">ความแม่นยำ</span>
+                            <span id="cert-accuracy" class="text-blue-600 font-extrabold text-base">95%</span>
+                        </div>
+                        <div>
+                            <span class="text-slate-400 block font-bold">วันที่ออกผล</span>
+                            <span id="cert-date" class="text-slate-600 font-medium">18 มิถุนายน 2026</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex gap-3 justify-center">
+                    <button onclick="printCert()" class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-6 py-2.5 rounded-xl text-sm transition-all flex items-center gap-1.5 shadow-md">
+                        <i class="fa-solid fa-print"></i> พิมพ์เกียรติบัตร
+                    </button>
+                    <button onclick="closeCertModal()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold px-6 py-2.5 rounded-xl text-sm transition-all">
+                        ปิดหน้าต่างนี้
+                    </button>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Footer for school/copyright -->
+    <footer class="text-center py-4 bg-white border-t border-slate-100 text-xs text-slate-400 shrink-0">
+        <p>© 2026 ตะลุยห้องแล็บคอมพิวเตอร์ - สื่อเรียนรู้วิทยาการคำนวณระดับประถมต้น</p>
+    </footer>
+
+    <!-- ================= JAVASCRIPT GAME LOGIC ================= -->
+    <script>
+        // Init Game state on load
+        window.onload = function() {
+            playSound('levelup'); // Intro pleasant tone
+        };
+
+        const updateHeaderStats = () => {
+            document.getElementById("header-score").innerText = state.score;
+            document.getElementById("header-xp").innerText = state.xp;
+            
+            // Accuracy calculated as correct / total answers
+            const total = state.correctCount + state.wrongCount;
+            state.accuracy = total > 0 ? Math.round((state.correctCount / total) * 100) : 100;
+            
+            const accDisp = document.getElementById("accuracy-display");
+            const corDisp = document.getElementById("correct-display");
+            const wrgDisp = document.getElementById("wrong-display");
+            
+            if (accDisp) accDisp.innerText = state.accuracy;
+            if (corDisp) corDisp.innerText = state.correctCount;
+            if (wrgDisp) wrgDisp.innerText = state.wrongCount;
+
+            // Handle combo visualization
+            const badge = document.getElementById("combo-badge");
+            const mult = document.getElementById("combo-multiplier");
+            if (badge && mult) {
+                if (state.combo >= 2) {
+                    badge.classList.remove("hidden");
+                    mult.innerText = state.combo;
+                    if (state.combo > state.maxCombo) {
+                        state.maxCombo = state.combo;
+                    }
+                } else {
+                    badge.classList.add("hidden");
+                }
+            }
+        };
+
+        const startGame = () => {
+            playSound('click');
+            const nameInput = document.getElementById("player-name-input").value.trim();
+            if (nameInput) {
+                state.playerName = nameInput;
+            } else {
+                state.playerName = "น้องนักเรียนสุดเก่ง";
+            }
+            
+            // Switch screen
+            document.getElementById("start-screen").classList.add("hidden");
+            document.getElementById("game-screen").classList.remove("hidden");
+            
+            // Start level 1
+            loadLevel(1);
+        };
+
+        const resetGame = () => {
+            playSound('click');
+            state.score = 0;
+            state.xp = 0;
+            state.combo = 0;
+            state.maxCombo = 0;
+            state.correctCount = 0;
+            state.wrongCount = 0;
+            state.accuracy = 100;
+            
+            updateHeaderStats();
+            
+            document.getElementById("victory-screen").classList.add("hidden");
+            document.getElementById("game-screen").classList.remove("hidden");
+            
+            loadLevel(1);
+        };
+    </script>
+
+    <script>
+        // Load appropriate layouts per Level
+        const loadLevel = (level) => {
+            state.currentLevel = level;
+            state.answersChecked = false;
+            state.levelPerfect = true;
+            
+            // Toggle next level buttons & check buttons
+            document.getElementById("next-level-btn").classList.add("hidden");
+            const checkBtn = document.getElementById("check-btn");
+            if (checkBtn) checkBtn.classList.remove("hidden");
+
+            // Stop timer if any
+            if (state.timerInterval) clearInterval(state.timerInterval);
+            document.getElementById("level-timer-container").classList.add("hidden");
+
+            // Set UI labels
+            document.getElementById("current-level-display").innerText = level;
+            const titleDisp = document.getElementById("level-title-display");
+            const instructDisp = document.getElementById("level-instruction");
+            const workspace = document.getElementById("level-workspace");
+            const progressBar = document.getElementById("level-progress-bar");
+            
+            progressBar.style.width = `${level * 20}%`;
+            workspace.innerHTML = ""; // Clear screen
+
+            if (level === 1) {
+                titleDisp.innerText = "จับคู่ภาพกับชื่ออุปกรณ์คอมพิวเตอร์";
+                instructDisp.innerText = "ลากแถบชื่ออุปกรณ์ด้านล่าง ไปใส่ในช่องว่างด้านหลังภาพไอคอนที่มีหน้าตายิ้มให้ตรงกันเลยจ้า!";
+                generateLevel1(workspace);
+            } else if (level === 2) {
+                titleDisp.innerText = "จับคู่หน้าที่อุปกรณ์คอมพิวเตอร์";
+                instructDisp.innerText = "พี่ๆ อุปกรณ์คอมพิวเตอร์มีหน้าที่อะไรบ้างนะ? จับคู่การทำงานกับรูปภาพให้ถูกต้องสิคนเก่ง!";
+                generateLevel2(workspace);
+            } else if (level === 3) {
+                titleDisp.innerText = "จำแนกประเภทอุปกรณ์คอมพิวเตอร์";
+                instructDisp.innerText = "ลากไอคอนคอมพิวเตอร์ด้านล่าง ไปแยกหมวดหมู่ให้ถูกต้อง: หน่วยรับข้อมูล (Input) หรือ หน่วยแสดงผล (Output)";
+                generateLevel3(workspace);
+            } else if (level === 4) {
+                titleDisp.innerText = "ตอบคำถามด่วนจี๋ ท้าทายจับเวลา!";
+                instructDisp.innerText = "เกมควิซทดสอบสมาธิ! คลิกคำตอบที่ถูกต้องที่สุดให้ได้มากที่สุดภายใน 60 วินาที!";
+                document.getElementById("level-timer-container").classList.remove("hidden");
+                generateLevel4(workspace);
+            } else if (level === 5) {
+                titleDisp.innerText = "บอสสเตจ: ประกอบคอมพิวเตอร์สุดพลัง!";
+                instructDisp.innerText = "ลากอุปกรณ์คอมพิวเตอร์หลักๆ (จอภาพ, ซีพียู, คีย์บอร์ด, เมาส์, ลำโพง) ไปติดตั้งบนโต๊ะคอมพิวเตอร์ให้ครบถ้วนเพื่อเปิดเครื่อง!";
+                generateLevel5(workspace);
+            }
+            
+            updateHeaderStats();
+        };
+
+        // Custom touch drag & drop wrapper to work on iOS safari, chrome, android and windows tablets
+        const makeDraggable = (element) => {
+            let active = false;
+            let currentX;
+            let currentY;
+            let initialX;
+            let initialY;
+            let xOffset = 0;
+            let yOffset = 0;
+            
+            element.addEventListener("touchstart", dragStart, false);
+            element.addEventListener("touchend", dragEnd, false);
+            element.addEventListener("touchmove", drag, false);
+
+            element.addEventListener("mousedown", dragStart, false);
+            element.addEventListener("mouseup", dragEnd, false);
+            element.addEventListener("mousemove", drag, false);
+
+            function dragStart(e) {
+                if (state.answersChecked || state.cameraActive) return; // Ignore mouse/touch drag when camera tracking is active
+                
+                if (e.type === "touchstart") {
+                    initialX = e.touches[0].clientX - xOffset;
+                    initialY = e.touches[0].clientY - yOffset;
+                } else {
+                    initialX = e.clientX - xOffset;
+                    initialY = e.clientY - yOffset;
+                }
+
+                if (e.target === element || element.contains(e.target)) {
+                    active = true;
+                    element.style.zIndex = "1000";
+                }
+            }
+
+            function dragEnd(e) {
+                if (!active || state.cameraActive) return;
+                initialX = currentX;
+                initialY = currentY;
+                active = false;
+                element.style.zIndex = "";
+
+                // Get drop area elements at release coordinates
+                let dropTarget = null;
+                const rect = element.getBoundingClientRect();
+                const checkX = rect.left + rect.width / 2;
+                const checkY = rect.top + rect.height / 2;
+
+                // Simple collision check for matching drops
+                const targets = document.querySelectorAll(".drop-zone-target");
+                targets.forEach(target => {
+                    const tRect = target.getBoundingClientRect();
+                    if (checkX >= tRect.left && checkX <= tRect.right &&
+                        checkY >= tRect.top && checkY <= tRect.bottom) {
+                        dropTarget = target;
+                    }
+                });
+
+                if (dropTarget) {
+                    // Check if drop is valid and snap item
+                    handleDrop(element, dropTarget);
+                    // Reset offset coords
+                    xOffset = 0;
+                    yOffset = 0;
+                    element.style.transform = `none`;
+                } else {
+                    // Snap back home
+                    xOffset = 0;
+                    yOffset = 0;
+                    element.style.transform = `none`;
+                }
+            }
+
+            function drag(e) {
+                if (active && !state.cameraActive) {
+                    e.preventDefault();
+                    if (e.type === "touchmove") {
+                        currentX = e.touches[0].clientX - initialX;
+                        currentY = e.touches[0].clientY - initialY;
+                    } else {
+                        currentX = e.clientX - initialX;
+                        currentY = e.clientY - initialY;
+                    }
+
+                    xOffset = currentX;
+                    yOffset = currentY;
+
+                    element.style.transform = `translate3d(${currentX}px, ${currentY}px, 0)`;
+                }
+            }
+        };
+
+        // Shared handler for successful drop zone drop
+        const handleDrop = (draggedEl, dropZoneEl) => {
+            playSound('click');
+            // If dropZone is already occupied, swap or clean
+            const existing = dropZoneEl.querySelector(".draggable-item");
+            if (existing) {
+                // put existing back to source pool
+                const source = document.getElementById("source-items-pool");
+                if (source) source.appendChild(existing);
+            }
+            
+            // Clean up custom absolute styles from camera dragging before appending
+            draggedEl.style.position = "";
+            draggedEl.style.left = "";
+            draggedEl.style.top = "";
+            draggedEl.style.zIndex = "";
+            draggedEl.style.transform = "none";
+            draggedEl.style.pointerEvents = "";
+
+            // Hide the default prompt text inside drop target
+            const placeholder = dropZoneEl.querySelector("p");
+            if (placeholder) placeholder.classList.add("hidden");
+
+            dropZoneEl.appendChild(draggedEl);
+        };
+    </script>
+
+    <script>
+        // ================= LEVEL 1: MATCHING PICTURE TO NAME =================
+        const generateLevel1 = (container) => {
+            // Selected subset of 4 items to keep it concise for kids
+            const pool = ["monitor", "keyboard", "mouse", "cpu"];
+            const items = pool.map(id => DEVICES[id]);
+            
+            // Layout
+            let html = `
+                <div class="flex-grow flex flex-col justify-between gap-6">
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            `;
+
+            // Draw targets (pictures with empty drag boxes)
+            items.forEach(item => {
+                html += `
+                    <div class="bg-blue-50/50 rounded-2xl p-4 border border-blue-200/50 flex flex-col items-center">
+                        <div class="w-20 h-20 mb-3 drop-shadow-md">
+                            ${SVG_ASSETS[item.id]}
+                        </div>
+                        <div class="drop-zone-target bg-white border-2 border-dashed border-slate-300 w-full h-12 rounded-xl flex items-center justify-center text-slate-400 font-bold text-sm" data-expected="${item.id}">
+                            วางชื่อที่นี่...
+                        </div>
+                    </div>
+                `;
+            });
+
+            html += `
+                    </div>
+                    <div class="bg-sky-50 rounded-2xl p-4 border border-sky-100">
+                        <p class="text-xs text-sky-600 font-bold mb-3 text-center"><i class="fa-solid fa-hand-pointer animate-pulse mr-1"></i> ลากป้ายชื่อคำศัพท์ไปวางให้ตรงภาพเลยจ้า</p>
+                        <div id="source-items-pool" class="flex flex-wrap gap-3 justify-center">
+            `;
+
+            // Shuffle matching item names
+            const shuffled = [...items].sort(() => Math.random() - 0.5);
+            shuffled.forEach(item => {
+                html += `
+                    <div class="draggable-item bg-white px-5 py-2.5 rounded-xl shadow-md border-2 border-sky-400 text-slate-800 font-extrabold text-sm bounce-hover flex items-center gap-1" data-id="${item.id}">
+                        <span class="text-sky-500">★</span> ${item.name}
+                    </div>
+                `;
+            });
+
+            html += `
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            container.innerHTML = html;
+
+            // Make draggable
+            container.querySelectorAll(".draggable-item").forEach(el => {
+                makeDraggable(el);
+            });
+        };
+
+        // ================= LEVEL 2: MATCHING PICTURE TO FUNCTION =================
+        const generateLevel2 = (container) => {
+            const pool = ["mouse", "printer", "speaker", "microphone"];
+            const items = pool.map(id => DEVICES[id]);
+
+            let html = `
+                <div class="flex-grow flex flex-col justify-between gap-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            `;
+
+            items.forEach(item => {
+                html += `
+                    <div class="bg-purple-50 rounded-2xl p-4 border border-purple-100 flex items-center gap-4">
+                        <div class="w-16 h-16 shrink-0 bg-white p-2 rounded-xl shadow-inner">
+                            ${SVG_ASSETS[item.id]}
+                        </div>
+                        <div class="flex-grow">
+                            <p class="text-xs text-purple-600 font-bold mb-1.5"><i class="fa-solid fa-shield-cat mr-1"></i> ช่วยค้นหาหน้าที่ของพี่เขาหน่อย:</p>
+                            <div class="drop-zone-target bg-white border-2 border-dashed border-purple-300 w-full h-14 rounded-xl flex items-center justify-center text-slate-400 font-medium text-xs md:text-sm p-2 text-center leading-tight" data-expected="${item.id}">
+                                วางแผ่นหน้าที่ตรงนี้...
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            html += `
+                    </div>
+                    <div class="bg-purple-50/50 rounded-2xl p-4 border border-purple-100 mt-4">
+                        <div id="source-items-pool" class="flex flex-col gap-2.5">
+            `;
+
+            // Shuffle cards
+            const shuffled = [...items].sort(() => Math.random() - 0.5);
+            shuffled.forEach(item => {
+                html += `
+                    <div class="draggable-item bg-white px-4 py-2 rounded-xl shadow border-l-4 border-purple-500 text-slate-700 font-bold text-xs md:text-sm hover:bg-purple-50 transition-colors flex items-center gap-2" data-id="${item.id}">
+                        <span class="bg-purple-100 text-purple-600 w-6 h-6 rounded-full flex items-center justify-center shrink-0"><i class="fa-solid fa-question text-[10px]"></i></span>
+                        <span>${item.desc}</span>
+                    </div>
+                `;
+            });
+
+            html += `
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            container.innerHTML = html;
+
+            container.querySelectorAll(".draggable-item").forEach(el => {
+                makeDraggable(el);
+            });
+        };
+
+        // ================= LEVEL 3: CLASSIFY INPUT VS OUTPUT =================
+        const generateLevel3 = (container) => {
+            const inputPool = ["mouse", "keyboard", "webcam"];
+            const outputPool = ["monitor", "speaker", "headphone"];
+            const items = [...inputPool, ...outputPool].map(id => DEVICES[id]);
+
+            let html = `
+                <div class="flex-grow flex flex-col justify-between gap-6">
+                    <!-- Zones -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <!-- Input Zone -->
+                        <div class="bg-amber-50 rounded-2xl p-4 border-2 border-dashed border-amber-300 flex flex-col">
+                            <h4 class="font-extrabold text-amber-700 text-center text-sm md:text-base mb-3 flex items-center justify-center gap-1.5">
+                                <span class="bg-amber-200 text-amber-800 w-6 h-6 rounded-full text-xs flex items-center justify-center">I</span>
+                                อุปกรณ์รับเข้าข้อมูล (Input Device)
+                            </h4>
+                            <div class="drop-zone-target bg-white/70 rounded-xl p-3 flex-grow min-h-[140px] flex flex-wrap gap-2 justify-center items-center content-center" data-category="input">
+                                <p class="text-xs text-slate-400 pointer-events-none text-center">ลากรูปภาพมาวางที่นี่...</p>
+                            </div>
+                        </div>
+
+                        <!-- Output Zone -->
+                        <div class="bg-teal-50 rounded-2xl p-4 border-2 border-dashed border-teal-300 flex flex-col">
+                            <h4 class="font-extrabold text-teal-700 text-center text-sm md:text-base mb-3 flex items-center justify-center gap-1.5">
+                                <span class="bg-teal-200 text-teal-800 w-6 h-6 rounded-full text-xs flex items-center justify-center">O</span>
+                                อุปกรณ์แสดงผล (Output Device)
+                            </h4>
+                            <div class="drop-zone-target bg-white/70 rounded-xl p-3 flex-grow min-h-[140px] flex flex-wrap gap-2 justify-center items-center content-center" data-category="output">
+                                <p class="text-xs text-slate-400 pointer-events-none text-center">ลากรูปภาพมาวางที่นี่...</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Source pool -->
+                    <div class="bg-slate-50 rounded-2xl p-4 border border-slate-200">
+                        <div id="source-items-pool" class="flex flex-wrap gap-4 justify-center">
+            `;
+
+            // Mix devices
+            const shuffled = items.sort(() => Math.random() - 0.5);
+            shuffled.forEach(item => {
+                html += `
+                    <div class="draggable-item bg-white p-2 rounded-2xl shadow-md border border-slate-200 w-16 h-16 md:w-20 md:h-20 flex flex-col items-center justify-center" data-id="${item.id}" data-cat="${item.cat}">
+                        <div class="w-12 h-12">
+                            ${SVG_ASSETS[item.id]}
+                        </div>
+                    </div>
+                `;
+            });
+
+            html += `
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            container.innerHTML = html;
+
+            container.querySelectorAll(".draggable-item").forEach(el => {
+                makeDraggable(el);
+            });
+        };
+
+        // ================= LEVEL 4: SPEED TIME ATTACK (QUIZ) =================
+        const generateLevel4 = (container) => {
+            // Setup quiz session
+            const questions = [
+                {
+                    q: "ข้อใดคืออุปกรณ์คอมพิวเตอร์ที่ใช้ในการ ‘ป้อนข้อความ’ หรือ พิมพ์งาน?",
+                    correct: "keyboard",
+                    options: ["keyboard", "monitor", "speaker", "harddisk"]
+                },
+                {
+                    q: "หนูต้องการ ‘ฟังเพลง’ จากยูทูป (YouTube) โดยไม่ให้ส่งเสียงดังรบกวนคนอื่น ควรใช้อุปกรณ์ใด?",
+                    correct: "headphone",
+                    options: ["headphone", "speaker", "microphone", "webcam"]
+                },
+                {
+                    q: "รูปภาพหรือการบ้านที่เราวาดลงกระดาษ จะถูกนำเข้าคอมพิวเตอร์ผ่านช่องทางใด?",
+                    correct: "scanner",
+                    options: ["scanner", "printer", "cpu", "mouse"]
+                },
+                {
+                    q: "อุปกรณ์ชิ้นใดที่มีฉายาว่า ‘สมองของคอมพิวเตอร์’ คอยจัดการข้อมูลทั้งหมด?",
+                    correct: "cpu",
+                    options: ["cpu", "monitor", "mouse", "flashdrive"]
+                },
+                {
+                    q: "เมื่อวาดรูปบนคอมพิวเตอร์แล้วต้องการ ‘พริ้นท์การ์ดภาพสวยๆ’ ออกมาลงกระดาษ ต้องใช้ชิ้นใด?",
+                    correct: "printer",
+                    options: ["printer", "scanner", "monitor", "keyboard"]
+                }
+            ];
+
+            let activeQuestionIndex = 0;
+            state.timer = 60; // Start with 60 seconds
+
+            const updateTimerDisplay = () => {
+                const clock = document.getElementById("level-timer");
+                if (clock) {
+                    clock.innerText = state.timer;
+                    if (state.timer <= 10) {
+                        clock.classList.add("text-rose-500", "animate-bounce");
+                    }
+                }
+            };
+
+            // Start countdown loop
+            state.timerInterval = setInterval(() => {
+                state.timer--;
+                updateTimerDisplay();
+                if (state.timer <= 0) {
+                    clearInterval(state.timerInterval);
+                    // Force complete level 4
+                    playSound('wrong');
+                    loadLevel(5);
+                }
+            }, 1000);
+
+            const renderQuestion = () => {
+                if (activeQuestionIndex >= questions.length) {
+                    clearInterval(state.timerInterval);
+                    // Automatically pass to Level 5 with perfect bonus if accuracy is 100
+                    if (state.levelPerfect) {
+                        state.score += 50;
+                        state.xp += 100;
+                    }
+                    playSound('levelup');
+                    loadLevel(5);
+                    return;
+                }
+
+                const current = questions[activeQuestionIndex];
+                
+                let qHtml = `
+                    <div class="flex-grow flex flex-col justify-between gap-4">
+                        <div class="bg-indigo-50 border border-indigo-100 rounded-3xl p-6 text-center">
+                            <span class="bg-indigo-100 text-indigo-700 font-extrabold text-xs px-3 py-1 rounded-full uppercase tracking-wider mb-2 inline-block">คำถามข้อที่ ${activeQuestionIndex + 1}/${questions.length}</span>
+                            <h4 class="text-base md:text-xl font-bold text-slate-800 leading-relaxed mt-2">${current.q}</h4>
+                        </div>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+                `;
+
+                // Shuffle options
+                const opts = [...current.options].sort(() => Math.random() - 0.5);
+                opts.forEach(optionKey => {
+                    const dev = DEVICES[optionKey];
+                    qHtml += `
+                        <button onclick="answerQuiz('${optionKey}', '${current.correct}')" class="bg-white hover:bg-slate-50 border-2 border-slate-200 active:border-indigo-400 p-4 rounded-2xl shadow-sm hover:shadow transition-all text-left flex items-center gap-3.5 bounce-hover" data-option="${optionKey}">
+                            <div class="w-12 h-12 bg-slate-100 p-1.5 rounded-xl shrink-0">
+                                ${SVG_ASSETS[optionKey]}
+                            </div>
+                            <div>
+                                <h5 class="font-extrabold text-slate-800 text-sm md:text-base">${dev.label}</h5>
+                                <span class="text-xs text-slate-400">${dev.name}</span>
+                            </div>
+                        </button>
+                    `;
+                });
+
+                qHtml += `
+                        </div>
+                    </div>
+                `;
+
+                container.innerHTML = qHtml;
+                // Level 4 handles checking immediately per question, so hide check button
+                const cb = document.getElementById("check-btn");
+                if (cb) cb.classList.add("hidden");
+            };
+
+            // Global access within active context
+            window.answerQuiz = (selected, correct) => {
+                if (selected === correct) {
+                    playSound('correct');
+                    state.correctCount++;
+                    state.combo++;
+                    state.score += 10 * (state.combo >= 3 ? 3 : (state.combo >= 2 ? 2 : 1));
+                    state.xp += 15;
+                    showFeedbackEffect(true);
+                } else {
+                    playSound('wrong');
+                    state.wrongCount++;
+                    state.combo = 0;
+                    state.score = Math.max(0, state.score - 5);
+                    state.levelPerfect = false;
+                    showFeedbackEffect(false);
+                }
+
+                activeQuestionIndex++;
+                updateHeaderStats();
+                renderQuestion();
+            };
+
+            renderQuestion();
+        };
+
+        // Helper showing animated smile/cry indicator based on answer
+        const showFeedbackEffect = (isCorrect) => {
+            const fb = document.createElement("div");
+            fb.className = `fixed inset-0 flex items-center justify-center z-50 pointer-events-none animate-ping duration-1000`;
+            fb.innerHTML = isCorrect ? 
+                `<span class="text-8xl">🌟💖</span>` : 
+                `<span class="text-8xl">😢❌</span>`;
+            document.body.appendChild(fb);
+            setTimeout(() => fb.remove(), 600);
+        };
+
+        // ================= LEVEL 5: BOSS ASSEMBLY STAGE =================
+        const generateLevel5 = (container) => {
+            // Essential setup components to place on custom vector desk layout
+            const deskItems = ["monitor", "cpu", "keyboard", "mouse", "speaker"];
+            
+            let html = `
+                <div class="flex-grow flex flex-col justify-between gap-6">
+                    <!-- Desk space workspace mock layout -->
+                    <div class="relative bg-slate-100 rounded-3xl border-4 border-slate-300 flex-grow min-h-[250px] overflow-hidden flex flex-col justify-end p-4">
+                        
+                        <!-- Grid outline layout showing shadows of parts -->
+                        <div class="absolute inset-0 grid grid-cols-5 gap-4 p-6 items-center content-center text-center opacity-60">
+                            
+                            <!-- Area: Left Speaker -->
+                            <div class="drop-zone-target bg-amber-200/40 border-2 border-dashed border-amber-400/80 rounded-2xl h-36 flex flex-col justify-center items-center" data-expected="speaker">
+                                <span class="text-xs font-bold text-amber-800">1. ลำโพง</span>
+                            </div>
+
+                            <!-- Area: Monitor Desk Center -->
+                            <div class="drop-zone-target bg-blue-200/40 border-2 border-dashed border-blue-400/80 rounded-2xl h-44 flex flex-col justify-center items-center col-span-2" data-expected="monitor">
+                                <span class="text-xs font-bold text-blue-800">2. หน้าจอ</span>
+                            </div>
+
+                            <!-- Area: CPU right desk -->
+                            <div class="drop-zone-target bg-emerald-200/40 border-2 border-dashed border-emerald-400/80 rounded-2xl h-44 flex flex-col justify-center items-center" data-expected="cpu">
+                                <span class="text-xs font-bold text-emerald-800">3. เครื่องซีพียู</span>
+                            </div>
+
+                            <!-- Area: Mouse place far right -->
+                            <div class="drop-zone-target bg-yellow-200/40 border-2 border-dashed border-yellow-400/80 rounded-2xl h-24 flex flex-col justify-center items-center" data-expected="mouse">
+                                <span class="text-xs font-bold text-yellow-800">4. เมาส์</span>
+                            </div>
+
+                        </div>
+
+                        <!-- Desk surface -->
+                        <div class="relative z-10 w-full h-16 bg-gradient-to-t from-slate-400 to-slate-300 rounded-b-2xl border-t-2 border-slate-200 flex justify-center items-center shadow-inner">
+                            <!-- Bottom Keyboards placement box -->
+                            <div class="drop-zone-target bg-rose-200/40 border-2 border-dashed border-rose-400/80 rounded-xl h-12 w-64 flex justify-center items-center" data-expected="keyboard">
+                                <span class="text-xs font-bold text-rose-800">5. คีย์บอร์ด</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Draggables source pool -->
+                    <div class="bg-slate-50 rounded-2xl p-4 border border-slate-200">
+                        <p class="text-xs text-slate-500 font-bold mb-3 text-center"><i class="fa-solid fa-gamepad animate-bounce mr-1"></i> ลากอุปกรณ์ด้านล่างไปประกอบจุดต่างๆ บนโต๊ะทำงานให้สำเร็จ</p>
+                        <div id="source-items-pool" class="flex flex-wrap gap-4 justify-center">
+            `;
+
+            const shuffled = deskItems.sort(() => Math.random() - 0.5);
+            shuffled.forEach(itemKey => {
+                html += `
+                    <div class="draggable-item bg-white p-3 rounded-2xl shadow-md border border-slate-200 w-16 h-16 md:w-20 md:h-20 flex flex-col items-center justify-center bounce-hover" data-id="${itemKey}">
+                        <div class="w-12 h-12">
+                            ${SVG_ASSETS[itemKey]}
+                        </div>
+                    </div>
+                `;
+            });
+
+            html += `
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            container.innerHTML = html;
+
+            container.querySelectorAll(".draggable-item").forEach(el => {
+                makeDraggable(el);
+            });
+            
+            // Allow checking
+            const cb = document.getElementById("check-btn");
+            if (cb) cb.classList.remove("hidden");
+        };
+    </script>
+
+    <script>
+        const checkAnswers = () => {
+            playSound('click');
+            const level = state.currentLevel;
+            const targets = document.querySelectorAll(".drop-zone-target");
+            let levelSuccess = true;
+            let answeredCount = 0;
+
+            if (level === 1 || level === 2) {
+                targets.forEach(zone => {
+                    const expectedId = zone.getAttribute("data-expected");
+                    const child = zone.querySelector(".draggable-item");
+                    
+                    if (child) {
+                        answeredCount++;
+                        const actualId = child.getAttribute("data-id");
+                        
+                        if (actualId === expectedId) {
+                            zone.classList.remove("border-dashed", "border-slate-300", "border-rose-400");
+                            zone.classList.add("border-solid", "border-emerald-400", "bg-emerald-50");
+                            state.correctCount++;
+                            state.combo++;
+                            state.score += 10 * (state.combo >= 3 ? 3 : (state.combo >= 2 ? 2 : 1));
+                            state.xp += 10;
+                        } else {
+                            zone.classList.remove("border-dashed", "border-slate-300", "border-emerald-400");
+                            zone.classList.add("border-solid", "border-rose-400", "bg-rose-50");
+                            state.wrongCount++;
+                            state.combo = 0;
+                            state.score = Math.max(0, state.score - 5);
+                            levelSuccess = false;
+                        }
+                    } else {
+                        // Unanswered slots are counted as wrong/incomplete
+                        levelSuccess = false;
+                    }
+                });
+
+                if (answeredCount < targets.length) {
+                    showDialogMessage("เด็กๆ จ๋า!", "โปรดลากวางคำตอบให้ครบทุกช่องก่อนตรวจนะจ๊ะ 💖");
+                    return;
+                }
+            } 
+            else if (level === 3) {
+                // Classify validation
+                let totalPlaced = 0;
+                targets.forEach(zone => {
+                    const expectedCategory = zone.getAttribute("data-category");
+                    const children = zone.querySelectorAll(".draggable-item");
+                    totalPlaced += children.length;
+
+                    children.forEach(child => {
+                        const actualCategory = child.getAttribute("data-cat");
+                        if (actualCategory === expectedCategory) {
+                            child.classList.add("border-2", "border-emerald-400");
+                            state.correctCount++;
+                            state.combo++;
+                            state.score += 10;
+                            state.xp += 10;
+                        } else {
+                            child.classList.add("border-2", "border-rose-400");
+                            state.wrongCount++;
+                            state.combo = 0;
+                            state.score = Math.max(0, state.score - 5);
+                            levelSuccess = false;
+                        }
+                    });
+                });
+
+                if (totalPlaced < 6) { // 6 total items in Level 3
+                    showDialogMessage("โปรดใส่ใจกันหน่อยจ้า!", "ลากไอคอนทั้งหมดไปใส่ช่องรับเข้าหรือแสดงผลให้ครบล้านเปอร์เซ็นต์นะคุณหนูๆ");
+                    return;
+                }
+            } 
+            else if (level === 5) {
+                // Assembly Validation
+                targets.forEach(zone => {
+                    const expectedId = zone.getAttribute("data-expected");
+                    const child = zone.querySelector(".draggable-item");
+                    
+                    if (child) {
+                        answeredCount++;
+                        const actualId = child.getAttribute("data-id");
+                        if (actualId === expectedId) {
+                            zone.classList.add("bg-emerald-100/60", "border-emerald-500");
+                            state.correctCount++;
+                            state.combo++;
+                            state.score += 10;
+                            state.xp += 15;
+                        } else {
+                            zone.classList.add("bg-rose-100/60", "border-rose-500");
+                            state.wrongCount++;
+                            state.combo = 0;
+                            state.score = Math.max(0, state.score - 5);
+                            levelSuccess = false;
+                        }
+                    } else {
+                        levelSuccess = false;
+                    }
+                });
+
+                if (answeredCount < targets.length) {
+                    showDialogMessage("ใกล้ความจริงแล้ว!", "ประกอบอวัยวะและส่วนต่อพ่วงคอมให้ครบทุกตำแหน่งก่อนนะคุณหนูๆ");
+                    return;
+                }
+            }
+
+            state.answersChecked = true;
+            updateHeaderStats();
+
+            // Screen Response feedback
+            if (levelSuccess) {
+                playSound('correct');
+                // Give Perfect Level bonus
+                state.score += 50;
+                showDialogMessage("เก่งสุดยอดเลย! ⭐⭐⭐", "ตอบถูกทุกข้อแบบสมบูรณ์แบบ ได้รับคะแนนโบนัส +50 แต้ม!");
+                document.getElementById("check-btn").classList.add("hidden");
+                document.getElementById("next-level-btn").classList.remove("hidden");
+            } else {
+                playSound('wrong');
+                showDialogMessage("อ๊ะเกือบถูกแล้วจ้า!", "ลองแก้ไขช่องที่ยังเป็นสีแดงหรือลองคิดใหม่อีกครั้งนะจ๊ะเด็กๆ");
+                // Allow them to retry the current level by resetting answers status
+                setTimeout(() => {
+                    loadLevel(level);
+                }, 2000);
+            }
+        };
+
+        const goToNextLevel = () => {
+            playSound('click');
+            const next = state.currentLevel + 1;
+            if (next <= 5) {
+                loadLevel(next);
+            } else {
+                // Finished all levels
+                endGameSession();
+            }
+        };
+
+        const endGameSession = () => {
+            playSound('levelup');
+            document.getElementById("game-screen").classList.add("hidden");
+            document.getElementById("victory-screen").classList.remove("hidden");
+            
+            // Set stats inside victory screen
+            document.getElementById("victory-score").innerText = state.score;
+            document.getElementById("victory-xp").innerText = state.xp;
+            document.getElementById("victory-accuracy").innerText = `${state.accuracy}%`;
+            document.getElementById("victory-combo").innerText = `x${state.maxCombo}`;
+
+            // Push current score to leaderboard
+            state.leaderboard.push({
+                name: state.playerName,
+                score: state.score,
+                level: 5,
+                accuracy: state.accuracy
+            });
+            // Sort leaderboard
+            state.leaderboard.sort((a, b) => b.score - a.score);
+            // Save localstorage
+            localStorage.setItem("it_kids_leaderboard", JSON.stringify(state.leaderboard));
+        };
+    </script>
+
+    <script>
+        const toggleTeacherMode = () => {
+            playSound('click');
+            document.getElementById("start-screen").classList.add("hidden");
+            document.getElementById("game-screen").classList.add("hidden");
+            document.getElementById("victory-screen").classList.add("hidden");
+            document.getElementById("teacher-screen").classList.remove("hidden");
+            
+            // Fill Leaderboard tbody
+            const tbody = document.getElementById("leaderboard-tbody");
+            tbody.innerHTML = "";
+            state.leaderboard.forEach((record, index) => {
+                let rating = "ผ่านเกณฑ์ขั้นต้น (ระดับพอใช้)";
+                let ratingColor = "text-amber-500 font-bold";
+                if (record.accuracy >= 90) {
+                    rating = "ยอดเยี่ยม (ผ่านระดับเกียรตินิยม)";
+                    ratingColor = "text-emerald-500 font-extrabold";
+                } else if (record.accuracy >= 75) {
+                    rating = "ดีมาก (ดีกว่ามาตรฐาน)";
+                    ratingColor = "text-blue-500 font-bold";
+                }
+
+                tbody.innerHTML += `
+                    <tr>
+                        <td class="p-3 text-slate-500 font-bold">${index + 1}</td>
+                        <td class="p-3 font-bold text-slate-700">${record.name}</td>
+                        <td class="p-3 text-center text-blue-600 font-bold">${record.score}</td>
+                        <td class="p-3 text-center">ด่านที่ ${record.level}</td>
+                        <td class="p-3 text-center font-bold text-slate-500">${record.accuracy}%</td>
+                        <td class="p-3 text-center ${ratingColor}">${rating}</td>
+                    </tr>
+                `;
+            });
+        };
+
+        const closeTeacherMode = () => {
+            playSound('click');
+            document.getElementById("teacher-screen").classList.add("hidden");
+            // Head back to start/game based on session status
+            if (state.score > 0) {
+                document.getElementById("game-screen").classList.remove("hidden");
+            } else {
+                document.getElementById("start-screen").classList.remove("hidden");
+            }
+        };
+
+        const clearLeaderboard = () => {
+            if (confirm("คุณครูแน่ใจใช่ไหมคะที่จะลบรายชื่อนักเรียนและสถิติคะแนนทั้งหมด?")) {
+                state.leaderboard = [];
+                localStorage.removeItem("it_kids_leaderboard");
+                toggleTeacherMode();
+            }
+        };
+
+        // Export analytics CSV
+        const exportCSV = () => {
+            let csvContent = "data:text/csv;charset=utf-8,\uFEFF"; // Include BOM for proper Thai language rendering in MS Excel
+            csvContent += "ลำดับ,ชื่อนักเรียน,คะแนนรวม,ระดับบทเรียนที่สำเร็จ,ความแม่นยำ (%)\n";
+            
+            state.leaderboard.forEach((r, idx) => {
+                csvContent += `${idx+1},${r.name},${r.score},ด่าน ${r.level},${r.accuracy}\n`;
+            });
+
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", `รายงานคะแนน_วิทยาการคำนวณ_${new Date().toLocaleDateString('th-TH')}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        };
+    </script>
+
+    <script>
+        const generateCertificate = () => {
+            playSound('levelup');
+            document.getElementById("cert-student-name").innerText = state.playerName;
+            document.getElementById("cert-score").innerText = `${state.score} คะแนน`;
+            document.getElementById("cert-accuracy").innerText = `${state.accuracy}%`;
+            
+            // Format today date in Thai
+            const options = { year: 'numeric', month: 'long', day: 'numeric' };
+            const today = new Date().toLocaleDateString('th-TH', options);
+            document.getElementById("cert-date").innerText = today;
+            
+            document.getElementById("cert-modal").classList.remove("hidden");
+        };
+
+        const closeCertModal = () => {
+            playSound('click');
+            document.getElementById("cert-modal").classList.add("hidden");
+        };
+
+        // Standard print utility for teachers/parents to print award page
+        const printCert = () => {
+            const printContent = document.getElementById("certificate-print-area").innerHTML;
+            const originalContent = document.body.innerHTML;
+            
+            // Temporary replace document body contents to optimize styling during physical printing
+            document.body.innerHTML = `
+                <div style="padding: 40px; text-align: center; font-family: 'Mitr', sans-serif;">
+                    ${printContent}
+                </div>
+            `;
+            window.print();
+            
+            // Reload page to restore active memory state variables
+            window.location.reload();
+        };
+
+        // Customized modal box instead of native un-stylable javascript alerts
+        const showDialogMessage = (title, msg) => {
+            const wrapper = document.createElement("div");
+            wrapper.className = "fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in";
+            wrapper.innerHTML = `
+                <div class="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl border-4 border-sky-400 text-center animate-bounce">
+                    <h3 class="font-extrabold text-xl text-sky-600 mb-2">${title}</h3>
+                    <p class="text-sm text-slate-600 font-medium mb-6 leading-relaxed">${msg}</p>
+                    <button id="close-dialog-btn" class="bg-sky-500 hover:bg-sky-400 text-white font-bold px-8 py-2.5 rounded-xl text-sm transition-all w-full shadow-md">
+                        เข้าใจแล้วจ้า! 👍
+                    </button>
+                </div>
+            `;
+            document.body.appendChild(wrapper);
+            
+            const closeBtn = wrapper.querySelector("#close-dialog-btn");
+            closeBtn.focus();
+            closeBtn.onclick = () => {
+                playSound('click');
+                wrapper.remove();
+            };
+        };
+    </script>
+
+    <!-- ================= CAMERA & HAND TRACKING INTEGRATION ================= -->
+    <script>
+        let mpHands = null;
+        let mpCamera = null;
+        let lastQuizInteractionTime = 0; // Prevent rapid firing clicks in Quiz Mode
+
+        const toggleCameraMode = () => {
+            if (state.cameraActive) {
+                stopCameraMode();
+            } else {
+                startCameraMode();
+            }
+        };
+
+        const startCameraMode = async () => {
+            playSound('click');
+            const toggleBtn = document.getElementById("camera-toggle-btn");
+            toggleBtn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> กำลังเชื่อมกล้อง...`;
+            toggleBtn.className = "bg-yellow-500 text-slate-900 px-4 py-1.5 rounded-full shadow-md transition-all flex items-center gap-1.5 text-xs font-black border-2 border-white";
+
+            // Check Secure Context (HTTPS) before trying to open camera
+            if (window.isSecureContext === false) {
+                showDialogMessage(
+                    "ไม่สามารถเปิดกล้องได้ 🔒", 
+                    "ระบบความปลอดภัยบังคับว่าต้องเล่นผ่านเว็บไซต์ที่ปลอดภัย (HTTPS) เท่านั้น หากลิงก์ที่แชร์มาไม่ใช่ HTTPS เบราว์เซอร์จะบล็อกกล้องอัตโนมัติค่ะ"
+                );
+                stopCameraMode();
+                return;
+            }
+
+            showDialogMessage(
+                "กำลังเตรียมกล้องจับมือวิเศษ 🎥", 
+                "กรุณากด 'อนุญาต (Allow)' สิทธิ์การเข้าถึงกล้องบนเบราว์เซอร์ และหากเล่นผ่านหน้าต่างแชร์ โปรดตรวจสอบว่าระบบนั้นอนุญาตให้ใช้กล้องด้วยนะคะ!"
+            );
+
+            try {
+                // Initialize MediaPipe elements
+                document.getElementById("camera-panel").classList.remove("hidden");
+                const pointer = document.getElementById("hand-pointer");
+                pointer.classList.remove("hidden");
+
+                const videoElement = document.getElementById('webcam-video');
+                const canvasElement = document.getElementById('webcam-canvas');
+                const canvasCtx = canvasElement.getContext('2d');
+
+                // Hardcode Canvas size to avoid aspect-ratio issues
+                canvasElement.width = 320;
+                canvasElement.height = 240;
+
+                mpHands = new Hands({
+                    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+                });
+
+                mpHands.setOptions({
+                    maxNumHands: 1,
+                    modelComplexity: 1,
+                    minDetectionConfidence: 0.65,
+                    minTrackingConfidence: 0.65
+                });
+
+                mpHands.onResults((results) => {
+                    // Clear canvas and draw feed
+                    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+                    canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+                    if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                        const landmarks = results.multiHandLandmarks[0];
+                        
+                        // Draw colorful glowing skeleton on canvas overlay
+                        drawHandSkeletons(canvasCtx, landmarks);
+
+                        // Track Thumb tip (Landmark 4) & Index Finger tip (Landmark 8)
+                        const thumb = landmarks[4];
+                        const indexFinger = landmarks[8];
+
+                        // Convert landmarks (0 to 1 range) to Screen Viewport Coordinates
+                        // Note: Video is mirrored horizontally, so we flip X coordinate: (1 - indexFinger.x)
+                        const screenX = (1 - indexFinger.x) * window.innerWidth;
+                        const screenY = indexFinger.y * window.innerHeight;
+
+                        // Calculate euclidean distance between thumb & index tip to detect Pinch gesture
+                        const dx = thumb.x - indexFinger.x;
+                        const dy = thumb.y - indexFinger.y;
+                        const dz = thumb.z - indexFinger.z;
+                        const pinchDistance = Math.sqrt(dx*dx + dy*dy + dz*dz);
+                        
+                        const isPinching = pinchDistance < 0.08; // Threshold
+
+                        // Smooth movement of custom magical cursor pointer
+                        pointer.style.left = `${screenX}px`;
+                        pointer.style.top = `${screenY}px`;
+
+                        const ring = document.getElementById("pointer-ring");
+                        const icon = document.getElementById("pointer-icon");
+
+                        if (isPinching) {
+                            ring.classList.remove("border-yellow-400");
+                            ring.classList.add("border-pink-500", "scale-75");
+                            icon.innerText = "✊"; // Pinched/Grab state
+                        } else {
+                            ring.classList.remove("border-pink-500", "scale-75");
+                            ring.classList.add("border-yellow-400");
+                            icon.innerText = "⭐"; // Hover state
+                        }
+
+                        // GAME INTERACTION HANDLERS FOR LEVELS (DRAG & DROP)
+                        if (!state.answersChecked) {
+                            if (isPinching) {
+                                // If pinch grabbed and not holding anything yet, search for matching target
+                                if (!state.grabbedElement) {
+                                    // Temporarily turn off cursor's pointer-events to find element underneath
+                                    pointer.style.pointerEvents = 'none';
+                                    const elementUnderCursor = document.elementFromPoint(screenX, screenY);
+                                    const draggableItem = elementUnderCursor ? elementUnderCursor.closest('.draggable-item') : null;
+                                    
+                                    if (draggableItem) {
+                                        state.grabbedElement = draggableItem;
+                                        state.grabbedElementOriginalParent = draggableItem.parentNode;
+                                        draggableItem.classList.add("glow-active", "rotate-2");
+                                    }
+                                }
+
+                                // If element is grabbed, align it with the index finger
+                                if (state.grabbedElement) {
+                                    state.grabbedElement.style.position = 'fixed';
+                                    state.grabbedElement.style.zIndex = '9999';
+                                    state.grabbedElement.style.pointerEvents = 'none';
+                                    
+                                    // Offset to keep center of element on target tip
+                                    const widthOffset = state.grabbedElement.offsetWidth / 2;
+                                    const heightOffset = state.grabbedElement.offsetHeight / 2;
+                                    
+                                    state.grabbedElement.style.left = `${screenX - widthOffset}px`;
+                                    state.grabbedElement.style.top = `${screenY - heightOffset}px`;
+                                }
+                            } else {
+                                // Release elements if pinch opened
+                                if (state.grabbedElement) {
+                                    state.grabbedElement.style.display = 'none'; // Temporarily hide to find target below
+                                    pointer.style.display = 'none';
+                                    
+                                    const releasedUnder = document.elementFromPoint(screenX, screenY);
+                                    
+                                    state.grabbedElement.style.display = '';
+                                    pointer.style.display = '';
+
+                                    const dropTarget = releasedUnder ? releasedUnder.closest('.drop-zone-target') : null;
+                                    
+                                    if (dropTarget) {
+                                        handleDrop(state.grabbedElement, dropTarget);
+                                    } else {
+                                        // Put back to origin point
+                                        if (state.grabbedElementOriginalParent) {
+                                            state.grabbedElementOriginalParent.appendChild(state.grabbedElement);
+                                        }
+                                    }
+
+                                    // Cleanup styles
+                                    state.grabbedElement.style.position = '';
+                                    state.grabbedElement.style.left = '';
+                                    state.grabbedElement.style.top = '';
+                                    state.grabbedElement.style.zIndex = '';
+                                    state.grabbedElement.style.pointerEvents = '';
+                                    state.grabbedElement.classList.remove("glow-active", "rotate-2");
+                                    state.grabbedElement = null;
+                                }
+                            }
+                        }
+
+                        // Special Hover/Pinch handling for Level 4 quiz cards
+                        if (state.currentLevel === 4) {
+                            pointer.style.pointerEvents = 'none';
+                            const targetButton = document.elementFromPoint(screenX, screenY);
+                            const quizOption = targetButton ? targetButton.closest('button[data-option]') : null;
+                            
+                            // Visual feedback
+                            document.querySelectorAll('button[data-option]').forEach(btn => {
+                                btn.classList.remove("border-indigo-500", "bg-indigo-50");
+                            });
+
+                            if (quizOption) {
+                                quizOption.classList.add("border-indigo-500", "bg-indigo-50");
+                                
+                                // Pinching triggers selection
+                                const nowTime = Date.now();
+                                if (isPinching && (nowTime - lastQuizInteractionTime > 1500)) {
+                                    lastQuizInteractionTime = nowTime;
+                                    quizOption.click();
+                                }
+                            }
+                        }
+
+                    } else {
+                        // Reset pointer visually if hands lost tracking
+                        const ring = document.getElementById("pointer-ring");
+                        const icon = document.getElementById("pointer-icon");
+                        ring.classList.remove("border-pink-500");
+                        ring.classList.add("border-yellow-400");
+                        icon.innerText = "❓";
+                    }
+                });
+
+                mpCamera = new Camera(videoElement, {
+                    onFrame: async () => {
+                        await mpHands.send({ image: videoElement });
+                    },
+                    width: 320,
+                    height: 240
+                });
+
+                await mpCamera.start();
+                state.cameraActive = true;
+
+                toggleBtn.innerHTML = `<i class="fa-solid fa-wand-magic"></i> ปิดกล้องจับมือ`;
+                toggleBtn.className = "bg-rose-500 hover:bg-rose-600 text-white px-4 py-1.5 rounded-full shadow-md transition-all flex items-center gap-1.5 text-xs font-black border-2 border-white animate-pulse";
+
+            } catch (err) {
+                console.error("Camera Hand tracking setup failed: ", err);
+                
+                let errorMsg = "ระบบไม่สามารถเข้าใช้งานเว็บแคมได้ หรือเบราว์เซอร์ไม่รองรับ";
+                
+                if (err.name === 'NotAllowedError' || err.message?.includes('Permission denied')) {
+                    errorMsg = "เบราว์เซอร์ถูกปฏิเสธการเข้าถึงกล้อง ลองกดที่รูป 🔒 (แม่กุญแจ) ข้างช่อง URL เพื่ออนุญาตสิทธิ์การใช้กล้องนะคะ";
+                } else if (err.name === 'NotFoundError' || err.message?.includes('Requested device not found')) {
+                    errorMsg = "ไม่พบอุปกรณ์กล้องในเครื่องคอมพิวเตอร์หรือแท็บเล็ตนี้ค่ะ";
+                } else if (err.name === 'NotReadableError' || err.message?.includes('Could not start video source')) {
+                    errorMsg = "กล้องอาจกำลังถูกใช้งานโดยโปรแกรมอื่นอยู่ค่ะ (เช่น Zoom, Meet)";
+                } else {
+                    errorMsg = `เกิดข้อผิดพลาด: ${err.message || "ไม่ทราบสาเหตุ"} <br>หากฝัง (Embed) เว็บนี้ไว้ในเว็บอื่น ต้องใส่โค้ด <b>allow="camera"</b> ใน iframe ด้วยค่ะ`;
+                }
+
+                showDialogMessage(
+                    "เชื่อมต่อกล้องล้มเหลว 🚫", 
+                    errorMsg + "<br><br><span class='text-xs text-sky-600'>คำแนะนำ: ให้ปิดโหมดกล้อง แล้วใช้นิ้วสัมผัสหรือเมาส์ลากเล่นตามปกตินะคะเด็กๆ</span>"
+                );
+                stopCameraMode();
+            }
+        };
+
+        const stopCameraMode = () => {
+            if (mpCamera) {
+                mpCamera.stop();
+            }
+            document.getElementById("camera-panel").classList.add("hidden");
+            document.getElementById("hand-pointer").classList.add("hidden");
+            
+            state.cameraActive = false;
+
+            // Reset Toggle Button
+            const toggleBtn = document.getElementById("camera-toggle-btn");
+            if (toggleBtn) {
+                toggleBtn.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles animate-pulse"></i> กล้องจับมือวิเศษ 🎥`;
+                toggleBtn.className = "bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 rounded-full shadow-md transition-all flex items-center gap-1.5 text-xs font-black border-2 border-white";
+            }
+
+            // Restore elements in hands
+            if (state.grabbedElement) {
+                if (state.grabbedElementOriginalParent) {
+                    state.grabbedElementOriginalParent.appendChild(state.grabbedElement);
+                }
+                state.grabbedElement.style.position = '';
+                state.grabbedElement.style.left = '';
+                state.grabbedElement.style.top = '';
+                state.grabbedElement.style.zIndex = '';
+                state.grabbedElement.style.pointerEvents = '';
+                state.grabbedElement.classList.remove("glow-active", "rotate-2");
+                state.grabbedElement = null;
+            }
+            playSound('click');
+        };
+
+        // Render magical hand landmarks visual effects
+        const drawHandSkeletons = (ctx, landmarks) => {
+            // Neon blue connections
+            ctx.strokeStyle = "#38bdf8";
+            ctx.lineWidth = 3.5;
+            ctx.fillStyle = "#fbbf24";
+
+            const connections = [
+                [0, 1], [1, 2], [2, 3], [3, 4], // Thumb
+                [0, 5], [5, 6], [6, 7], [7, 8], // Index finger
+                [5, 9], [9, 10], [10, 11], [11, 12], // Middle finger
+                [9, 13], [13, 14], [14, 15], [15, 16], // Ring finger
+                [13, 17], [17, 18], [18, 19], [19, 20], [0, 17] // Pinky & Palm
+            ];
+
+            connections.forEach(([start, end]) => {
+                const p1 = landmarks[start];
+                const p2 = landmarks[end];
+                ctx.beginPath();
+                ctx.moveTo(p1.x * ctx.canvas.width, p1.y * ctx.canvas.height);
+                ctx.lineTo(p2.x * ctx.canvas.width, p2.y * ctx.canvas.height);
+                ctx.stroke();
+            });
+
+            // Draw glowing orange joints
+            landmarks.forEach(point => {
+                ctx.beginPath();
+                ctx.arc(point.x * ctx.canvas.width, point.y * ctx.canvas.height, 4.5, 0, 2 * Math.PI);
+                ctx.fill();
+            });
+        };
+    </script>
+
+</body>
+</html>
